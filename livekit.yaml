@@ -1,0 +1,10 @@
+port: 7880
+
+rtc:
+  tcp_port: 7881
+
+  # 🔴 ОБЯЗАТЕЛЬНО
+  node_ip: 192.168.1.100
+
+keys:
+  devkey: "debVq9RypzdLFGHaKNfYeXDmgOBs4JhTCcUZtPrWSQvkn1603I"

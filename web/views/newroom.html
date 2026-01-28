@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Create / Join Room</title>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 600px;
+      margin: 40px auto;
+    }
+
+    h1 {
+      margin-bottom: 10px;
+    }
+
+    input {
+      padding: 8px;
+      width: 100%;
+      margin: 6px 0 12px 0;
+      font-size: 16px;
+    }
+
+    button {
+      padding: 10px 16px;
+      font-size: 16px;
+      cursor: pointer;
+      margin-right: 10px;
+    }
+
+    #status {
+      margin-top: 15px;
+      color: #444;
+    }
+
+    .box {
+      border: 1px solid #ccc;
+      padding: 16px;
+      border-radius: 6px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>New Room</h1>
+  <p>Create or join a LiveKit room</p>
+
+  <div class="box">
+    <label>Room name</label>
+    <input id="room" placeholder="e.g. class1" />
+
+    <label>Your name</label>
+    <input id="name" placeholder="e.g. Bek" />
+
+    <button id="createBtn">Create room</button>
+    <button id="joinBtn">Join room</button>
+
+    <div id="status"></div>
+  </div>
+
+  <script>
+    const roomInput = document.getElementById("room");
+    const nameInput = document.getElementById("name");
+    const statusEl = document.getElementById("status");
+
+    const createBtn = document.getElementById("createBtn");
+    const joinBtn = document.getElementById("joinBtn");
+
+    function setStatus(text) {
+      statusEl.textContent = text;
+    }
+
+    function validate() {
+      const room = roomInput.value.trim();
+      const name = nameInput.value.trim();
+
+      if (!room || !name) {
+        setStatus("❌ Room and name are required");
+        return null;
+      }
+
+      return { room, name };
+    }
+
+    // CREATE ROOM
+    createBtn.onclick = async () => {
+      const data = validate();
+      if (!data) return;
+
+      setStatus("Creating room...");
+
+      try {
+        const res = await fetch("/api/v1/livekit/join", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "secret123"
+          },
+          body: JSON.stringify(data)
+        });
+
+        if (!res.ok) {
+          const err = await res.text();
+          setStatus("❌ API error: " + err);
+          return;
+        }
+
+        // Room is auto-created by LiveKit on join
+        setStatus("✅ Room created. Redirecting...");
+
+        window.location.href = "/join/" + encodeURIComponent(data.room);
+
+      } catch (e) {
+        setStatus("❌ Network error: " + e.message);
+      }
+    };
+
+    // JOIN ROOM
+    joinBtn.onclick = () => {
+      const data = validate();
+      if (!data) return;
+
+      setStatus("Joining room...");
+      window.location.href = "/join/" + encodeURIComponent(data.room);
+    };
+  </script>
+
+</body>
+</html>

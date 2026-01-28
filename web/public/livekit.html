@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>LiveKit Class</title>
+  <script src="/public/vendor/livekit-client.umd.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; }
+    .wrap { display: flex; height: 100vh; }
+    .left { flex: 1; padding: 16px; overflow: auto; }
+    .right { width: 360px; border-left: 1px solid #ddd; display:flex; flex-direction:column; }
+    video, audio { width: 320px; margin: 10px; border: 1px solid #ccc; border-radius: 8px; background:#000; }
+    #videos { display: flex; flex-wrap: wrap; gap: 10px; }
+
+    .topbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    input { padding: 6px 8px; }
+    button { padding: 6px 10px; }
+
+    #status { margin: 10px 0; color:#333; }
+
+    /* chat */
+    .chat-header { padding: 12px; font-weight: bold; border-bottom: 1px solid #eee; }
+    #chatLog { flex:1; padding: 12px; overflow:auto; background:#fafafa; }
+    .msg { margin: 0 0 10px; }
+    .msg .who { font-weight: bold; }
+    .chat-input { display:flex; gap:8px; padding: 12px; border-top:1px solid #eee; }
+    #chatText { flex:1; }
+    .hint { font-size: 12px; color:#666; padding: 0 12px 12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="left">
+      <h2>LiveKit Classroom</h2>
+
+      <div class="topbar">
+        <label>Room:</label>
+        <input id="room" value="class1" />
+        <label>Name:</label>
+        <input id="name" value="Bek" />
+        <button id="btn">Join</button>
+        <button id="leave" disabled>Leave</button>
+      </div>
+
+      <p id="status"></p>
+      <div id="videos"></div>
+    </div>
+
+    <div class="right">
+      <div class="chat-header">Chat</div>
+      <div id="chatLog"></div>
+      <div class="hint">Enter = send. Chat works only when you are connected.</div>
+      <div class="chat-input">
+        <input id="chatText" placeholder="Type message..." disabled />
+        <button id="sendBtn" disabled>Send</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const statusEl = document.getElementById("status");
+    const videosEl = document.getElementById("videos");
+    const btn = document.getElementById("btn");
+    const leaveBtn = document.getElementById("leave");
+
+    const chatLog = document.getElementById("chatLog");
+    const chatText = document.getElementById("chatText");
+    const sendBtn = document.getElementById("sendBtn");
+
+    let room;
+
+    function setStatus(t) { statusEl.textContent = t; }
+    function clearVideos() { videosEl.innerHTML = ""; }
+    function attachTrack(track) { videosEl.appendChild(track.attach()); }
+
+    function addChatLine(who, text) {
+      const div = document.createElement("div");
+      div.className = "msg";
+      div.innerHTML = `<span class="who"></span>: <span class="text"></span>`;
+      div.querySelector(".who").textContent = who;
+      div.querySelector(".text").textContent = text;
+      chatLog.appendChild(div);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    async function sendChat() {
+      const text = chatText.value.trim();
+      if (!text || !room) return;
+
+      // отправляем как reliable data message
+      const LK = window.LivekitClient;
+      const enc = new TextEncoder();
+      try {
+        await room.localParticipant.publishData(
+          enc.encode(text),
+          LK.DataPacket_Kind.RELIABLE
+        );
+        addChatLine("Me", text);
+        chatText.value = "";
+      } catch (e) {
+        addChatLine("System", "Failed to send: " + (e?.message || e));
+      }
+    }
+
+    sendBtn.onclick = sendChat;
+    chatText.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") sendChat();
+    });
+
+    btn.onclick = async () => {
+      btn.disabled = true;
+      leaveBtn.disabled = true;
+      setStatus("Requesting token...");
+
+      const roomName = document.getElementById("room").value.trim();
+      const name = document.getElementById("name").value.trim();
+
+      const res = await fetch("/api/v1/livekit/join", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "secret123" },
+        body: JSON.stringify({ room: roomName, name })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setStatus("API error: " + JSON.stringify(data, null, 2));
+        btn.disabled = false;
+        return;
+      }
+
+      const LK = window.LivekitClient;
+      if (!LK) {
+        setStatus("LiveKit library not loaded (window.LivekitClient is undefined).");
+        btn.disabled = false;
+        return;
+      }
+
+      setStatus("Connecting to LiveKit...");
+      room = new LK.Room({ adaptiveStream: true, dynacast: true });
+
+      room.on(LK.RoomEvent.TrackSubscribed, (track) => attachTrack(track));
+      room.on(LK.RoomEvent.TrackUnsubscribed, (track) => {
+        try { track.detach().forEach(el => el.remove()); } catch (_) {}
+      });
+
+      // ✅ чат: принимать сообщения
+      room.on(LK.RoomEvent.DataReceived, (payload, participant, kind) => {
+        try {
+          const text = new TextDecoder().decode(payload);
+          const who = participant?.name || participant?.identity || "Unknown";
+          addChatLine(who, text);
+        } catch (e) {
+          addChatLine("System", "Bad message payload");
+        }
+      });
+
+      room.on(LK.RoomEvent.Disconnected, (reason) => {
+        setStatus("Disconnected: " + (reason || ""));
+        clearVideos();
+        btn.disabled = false;
+        leaveBtn.disabled = true;
+
+        chatText.disabled = true;
+        sendBtn.disabled = true;
+
+        room = null;
+      });
+
+      try {
+        await room.connect(data.wsUrl, data.token);
+      } catch (e) {
+        setStatus("Connect error: " + (e?.message || e));
+        btn.disabled = false;
+        room = null;
+        return;
+      }
+
+      setStatus("Connected. Enabling camera/mic...");
+
+      try {
+        await room.localParticipant.enableCameraAndMicrophone();
+      } catch (e) {
+        setStatus("Media error (camera/mic): " + (e?.message || e));
+        try { room.disconnect(); } catch (_) {}
+        room = null;
+        btn.disabled = false;
+        return;
+      }
+
+      // local preview
+      for (const pub of room.localParticipant.trackPublications.values()) {
+        if (pub.track) attachTrack(pub.track);
+      }
+
+      // включаем чат
+      chatText.disabled = false;
+      sendBtn.disabled = false;
+      addChatLine("System", "Chat connected.");
+
+      leaveBtn.disabled = false;
+      setStatus("✅ Joined " + data.room + " as " + data.name);
+    };
+
+    leaveBtn.onclick = () => {
+      try { if (room) room.disconnect(); } catch (_) {}
+      room = null;
+      clearVideos();
+      setStatus("Left room.");
+      btn.disabled = false;
+      leaveBtn.disabled = true;
+
+      chatText.disabled = true;
+      sendBtn.disabled = true;
+      addChatLine("System", "You left the room.");
+    };
+  </script>
+</body>
+</html>
