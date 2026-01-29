@@ -13,9 +13,9 @@ type LiveKitService struct {
 	APIKey    string
 	APISecret string
 
-	HTTPPort   int    // 7880
-	Secure     bool   // false => ws, true => wss
-	PublicHost string // если задано: всегда используем его (лучше для телефона)
+	HTTPPort   int
+	Secure     bool
+	PublicHost string
 }
 
 func NewLiveKitService(apiKey, apiSecret string, httpPort int, secure bool, publicHost string) *LiveKitService {
@@ -31,15 +31,17 @@ func NewLiveKitService(apiKey, apiSecret string, httpPort int, secure bool, publ
 func (s *LiveKitService) WSURLFromRequestHost(hostHeader string) string {
 	hostname := extractHostname(hostHeader)
 
+	// ✅ если задан PublicHost — всегда он (лучше для телефона)
 	if s.PublicHost != "" {
 		hostname = s.PublicHost
 	}
 
 	scheme := "ws"
 	if s.Secure {
-		scheme = "wss" // ✅ secure => wss
+		scheme = "wss"
 	}
 
+	// livekit-client ожидает базовый wsUrl без пути
 	return fmt.Sprintf("%s://%s:%d", scheme, hostname, s.HTTPPort)
 }
 
@@ -49,23 +51,18 @@ func extractHostname(host string) string {
 		return "localhost"
 	}
 
-	// IPv6: "[::1]:3010"
-	if strings.Contains(h, ":") {
-		if hh, _, err := net.SplitHostPort(h); err == nil {
-			return strings.Trim(hh, "[]")
-		}
-		// fallback для "host:port"
-		if i := strings.LastIndex(h, ":"); i > 0 {
-			return strings.Trim(h[:i], "[]")
-		}
+	// пример: "[::1]:3010" или "127.0.0.1:3010"
+	if hh, _, err := net.SplitHostPort(h); err == nil {
+		return strings.Trim(hh, "[]")
 	}
 
+	// fallback: если без порта
 	return strings.Trim(h, "[]")
 }
 
 func boolPtr(v bool) *bool { return &v }
 
-// JoinToken with role-based permissions.
+// JoinToken issues token with role-based permissions.
 // role: "teacher" | "student"
 func (s *LiveKitService) JoinToken(room, identity, displayName, role string) (string, error) {
 	role = strings.ToLower(strings.TrimSpace(role))
@@ -77,17 +74,14 @@ func (s *LiveKitService) JoinToken(room, identity, displayName, role string) (st
 	at.SetIdentity(identity)
 	at.SetName(displayName)
 
-	// базовые права всем: зайти + смотреть + чат
 	grant := &lkauth.VideoGrant{
 		RoomJoin: true,
 		Room:     room,
 
-		// В твоей версии это *bool
 		CanSubscribe:   boolPtr(true),
-		CanPublishData: boolPtr(true),
+		CanPublishData: boolPtr(true), // ✅ чат всем
 	}
 
-	// teacher может публиковать видео/мик/шэр экрана
 	if role == "teacher" {
 		grant.CanPublish = boolPtr(true)
 		grant.CanPublishSources = []string{
@@ -96,15 +90,18 @@ func (s *LiveKitService) JoinToken(room, identity, displayName, role string) (st
 			"screen_share",
 		}
 	} else {
-		// student по умолчанию НЕ публикует видео/мик
-		grant.CanPublish = boolPtr(false)
-		grant.CanPublishSources = nil
+		// ✅ STUDENT ТОЖЕ МОЖЕТ ПУБЛИКОВАТЬ ВИДЕО И МИК
+		grant.CanPublish = boolPtr(true)
+		grant.CanPublishSources = []string{
+			"camera",
+			"microphone",
+		}
 	}
 
 	at.AddGrant(grant)
 	at.SetValidFor(time.Hour)
 
-	// опционально: роль в metadata (можно читать на фронте через participant.metadata)
+	// metadata: role
 	_ = at.SetMetadata(fmt.Sprintf(`{"role":"%s"}`, role))
 
 	return at.ToJWT()

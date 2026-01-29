@@ -26,7 +26,11 @@ type Config struct {
 	}
 
 	API struct {
+		// 🔐 API protection for /api/*
 		KeySecret string
+
+		// 🎓 Teacher role protection
+		TeacherKey string
 	}
 
 	LiveKit struct {
@@ -64,7 +68,7 @@ func Load() Config {
 	c.TLS.KeyFile = envString("TLS_KEY_FILE", "ssl/key.pem")
 
 	// =======================
-	// Host protection
+	// Host protection (basic auth)
 	// =======================
 	c.HostProtection.Protected = envBool("HOST_PROTECTED", false)
 	c.HostProtection.Username = envString("HOST_USERNAME", "admin")
@@ -74,6 +78,10 @@ func Load() Config {
 	// API
 	// =======================
 	c.API.KeySecret = envString("API_KEY_SECRET", "secret123")
+
+	// 🔑 Teacher role secret
+	// если пусто — teacher НИКОГДА не выдается
+	c.API.TeacherKey = envString("API_TEACHER_KEY", "")
 
 	// =======================
 	// LiveKit (🔥 ВАЖНО)
@@ -85,6 +93,8 @@ func Load() Config {
 	)
 	c.LiveKit.Port = envInt("LIVEKIT_PORT", 7880)
 	c.LiveKit.Secure = envBool("LIVEKIT_SECURE", false)
+
+	// ⚠️ В production ОБЯЗАТЕЛЬНО указать реальный IP или домен
 	c.LiveKit.PublicHost = envString("LIVEKIT_PUBLIC_HOST", "127.0.0.1")
 
 	// =======================

@@ -1,6 +1,5 @@
-import "./styles.css";
 import { fetchJoin } from "./api";
-import { qs, setStatus } from "./ui";
+import { createTile, attachMedia, qs, setStatus, unlockAudio } from "./ui";
 
 import {
   Room,
@@ -12,29 +11,81 @@ import {
   LocalTrackPublication,
 } from "livekit-client";
 
-// DOM
-const videosEl = qs<HTMLDivElement>("#videos");
-const messagesEl = qs<HTMLDivElement>("#messages");
-const countInfo = qs<HTMLDivElement>("#countInfo");
-const whoamiEl = qs<HTMLDivElement>("#whoami");
+/* ---------------- DOM: render SPA ---------------- */
 
-const joinBtn = qs<HTMLButtonElement>("#joinBtn");
-const leaveBtn = qs<HTMLButtonElement>("#leaveBtn");
-const micBtn = qs<HTMLButtonElement>("#micBtn");
-const camBtn = qs<HTMLButtonElement>("#camBtn");
-const screenBtn = qs<HTMLButtonElement>("#screenBtn");
+export function mountRoomPage() {
+  const app = document.getElementById("app");
+  if (!app) throw new Error("Missing #app");
 
-const roomInput = qs<HTMLInputElement>("#room");
-const nameInput = qs<HTMLInputElement>("#name");
-const roleSelect = qs<HTMLSelectElement>("#role");
-const chatInput = qs<HTMLInputElement>("#chatText");
-const sendBtn = qs<HTMLButtonElement>("#sendMsg");
+  app.innerHTML = `
+    <header>
+      <label>Room:</label>
+      <input id="room" />
 
-// state
+      <label>Name:</label>
+      <input id="name" value="Bek" />
+
+      <label>Role:</label>
+      <select id="role">
+        <option value="student">Student</option>
+        <option value="teacher">Teacher</option>
+      </select>
+
+      <label class="small">Teacher key:</label>
+      <input id="teacherKey" placeholder="(only for teacher)" />
+
+      <button id="joinBtn">Join</button>
+      <button id="leaveBtn" class="danger" disabled>Leave</button>
+
+      <button id="micBtn" class="secondary" disabled>Mic: ON</button>
+      <button id="camBtn" class="secondary" disabled>Cam: ON</button>
+      <button id="screenBtn" class="secondary" disabled>Share Screen</button>
+    </header>
+
+    <div id="statusBar">
+      <div id="statusText">Idle</div>
+      <div class="small">
+        <span id="countInfo">Participants: 0</span>
+        &nbsp;•&nbsp;
+        <span id="whoami"></span>
+      </div>
+    </div>
+
+    <div id="main">
+      <div id="videosWrap">
+        <div id="videosHeader">
+          <div>Participants videos</div>
+          <div class="small">LiveKit</div>
+        </div>
+        <div id="videos"></div>
+      </div>
+
+      <div id="chat">
+        <div id="chatHeader">
+          <div>Chat</div>
+          <div class="small">Data (reliable)</div>
+        </div>
+        <div id="messages"></div>
+        <div id="chatInput">
+          <input id="chatText" placeholder="Type message…" />
+          <button id="sendMsg">Send</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  boot();
+}
+
+/* ---------------- state ---------------- */
+
 let room: Room | null = null;
+
 let myName = "";
 let myRoomName = "";
 let myRole: "teacher" | "student" = "student";
+let teacherKey = "";
+
 let micOn = true;
 let camOn = true;
 let screenOn = false;
@@ -50,7 +101,9 @@ function nowTime(ts: number) {
 }
 
 function addMessage(opts: { from: string; text: string; ts?: number; me?: boolean }) {
+  const messagesEl = qs<HTMLDivElement>("#messages");
   const ts = opts.ts ?? Date.now();
+
   const wrap = document.createElement("div");
   wrap.className = "msg" + (opts.me ? " me" : "");
 
@@ -67,51 +120,30 @@ function addMessage(opts: { from: string; text: string; ts?: number; me?: boolea
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
-function enableControls(connected: boolean) {
-  joinBtn.disabled = connected;
-  leaveBtn.disabled = !connected;
-
-  // teacher может публиковать
-  const canPublish = connected && myRole === "teacher";
-  micBtn.disabled = !canPublish;
-  camBtn.disabled = !canPublish;
-  screenBtn.disabled = !canPublish;
-}
-
-function resetUI() {
-  videosEl.innerHTML = "";
-  micOn = true;
-  camOn = true;
-  screenOn = false;
-  micBtn.textContent = "Mic: ON";
-  camBtn.textContent = "Cam: ON";
-  screenBtn.textContent = "Share Screen";
-  updateCount();
-}
-
 function updateCount() {
+  const countInfo = qs<HTMLSpanElement>("#countInfo");
   const participants = room ? 1 + room.remoteParticipants.size : 0;
   countInfo.textContent = `Participants: ${participants}`;
 }
 
-function tileIdFor(identity: string, kind: "cam" | "screen" | "local") {
+function isScreenPublication(pub?: TrackPublication | LocalTrackPublication) {
+  return (
+    pub?.source === Track.Source.ScreenShare ||
+    pub?.source === Track.Source.ScreenShareAudio
+  );
+}
+
+function tileKey(identity: string, kind: "cam" | "screen" | "local") {
   return `tile__${identity}__${kind}`;
 }
 
 function ensureTile(identity: string, label: string, kind: "cam" | "screen" | "local") {
-  const id = tileIdFor(identity, kind);
-  let tile = document.getElementById(id) as HTMLDivElement | null;
+  const videosEl = qs<HTMLDivElement>("#videos");
+  const id = tileKey(identity, kind);
+  let tile = document.getElementById(id);
 
   if (!tile) {
-    tile = document.createElement("div");
-    tile.className = "tile";
-    tile.id = id;
-
-    const badge = document.createElement("div");
-    badge.className = "badge";
-    badge.textContent = label;
-
-    tile.appendChild(badge);
+    tile = createTile(id, label);
     videosEl.appendChild(tile);
   } else {
     const badge = tile.querySelector(".badge");
@@ -122,99 +154,137 @@ function ensureTile(identity: string, label: string, kind: "cam" | "screen" | "l
 }
 
 function removeTile(identity: string, kind: "cam" | "screen" | "local") {
-  const id = tileIdFor(identity, kind);
+  const id = tileKey(identity, kind);
   document.getElementById(id)?.remove();
 }
 
-function attachVideoToTile(tile: HTMLElement, mediaEl: HTMLMediaElement) {
-  tile.querySelectorAll("video,audio").forEach((v) => v.remove());
-  mediaEl.autoplay = true;
-  (mediaEl as any).playsInline = true;
-  tile.appendChild(mediaEl);
+function enableControls(connected: boolean) {
+  const joinBtn = qs<HTMLButtonElement>("#joinBtn");
+  const leaveBtn = qs<HTMLButtonElement>("#leaveBtn");
+  const micBtn = qs<HTMLButtonElement>("#micBtn");
+  const camBtn = qs<HTMLButtonElement>("#camBtn");
+  const screenBtn = qs<HTMLButtonElement>("#screenBtn");
+
+  joinBtn.disabled = connected;
+  leaveBtn.disabled = !connected;
+
+  const canPublish = connected && myRole === "teacher";
+  micBtn.disabled = !canPublish;
+  camBtn.disabled = !canPublish;
+  screenBtn.disabled = !canPublish;
 }
 
-function isScreenPublication(pub?: TrackPublication) {
-  return (
-    pub?.source === Track.Source.ScreenShare ||
-    pub?.source === Track.Source.ScreenShareAudio
-  );
+function resetUI() {
+  const videosEl = qs<HTMLDivElement>("#videos");
+  videosEl.innerHTML = "";
+
+  micOn = true;
+  camOn = true;
+  screenOn = false;
+
+  const micBtn = qs<HTMLButtonElement>("#micBtn");
+  const camBtn = qs<HTMLButtonElement>("#camBtn");
+  const screenBtn = qs<HTMLButtonElement>("#screenBtn");
+
+  micBtn.textContent = "Mic: ON";
+  camBtn.textContent = "Cam: ON";
+  screenBtn.textContent = "Share Screen";
+
+  updateCount();
 }
 
-/* ---------------- join logic ---------------- */
+/* ---------------- core ---------------- */
 
 async function doJoin() {
   enableControls(false);
   setStatus("Requesting token...");
 
+  // ✅ unlock audio by user gesture
+  await unlockAudio();
+
+  const roomInput = qs<HTMLInputElement>("#room");
+  const nameInput = qs<HTMLInputElement>("#name");
+  const roleSelect = qs<HTMLSelectElement>("#role");
+  const teacherKeyInput = qs<HTMLInputElement>("#teacherKey");
+
   myRoomName = roomInput.value.trim();
   myName = nameInput.value.trim();
   myRole = (roleSelect.value === "teacher" ? "teacher" : "student");
+  teacherKey = teacherKeyInput.value.trim();
 
   if (!myRoomName || !myName) {
     setStatus("Room and Name are required");
-    joinBtn.disabled = false;
+    enableControls(false);
+    qs<HTMLButtonElement>("#joinBtn").disabled = false;
     return;
   }
 
-  whoamiEl.textContent = `${myName} @ ${myRoomName} (${myRole})`;
+  const whoami = qs<HTMLSpanElement>("#whoami");
+  whoami.textContent = `${myName} @ ${myRoomName} (${myRole})`;
 
   let data;
   try {
-    data = await fetchJoin(myRoomName, myName, myRole);
+    data = await fetchJoin(myRoomName, myName, myRole, teacherKey);
   } catch (e: any) {
     setStatus("API error: " + String(e?.message || e));
-    joinBtn.disabled = false;
+    qs<HTMLButtonElement>("#joinBtn").disabled = false;
     return;
   }
 
+  // сервер может вернуть student даже если просили teacher
+  myRole = data.role;
+
   room = new Room({ adaptiveStream: true, dynacast: true });
 
-  /* ---- room events ---- */
+  /* ---- events ---- */
 
   room.on(RoomEvent.ParticipantConnected, (p: RemoteParticipant) => {
-    addMessage({ from: "system", text: `${p.identity} joined`, ts: Date.now() });
+    addMessage({ from: "system", text: `${p.identity} joined` });
     updateCount();
   });
 
   room.on(RoomEvent.ParticipantDisconnected, (p: RemoteParticipant) => {
-    addMessage({ from: "system", text: `${p.identity} left`, ts: Date.now() });
+    addMessage({ from: "system", text: `${p.identity} left` });
     removeTile(p.identity, "cam");
     removeTile(p.identity, "screen");
     updateCount();
   });
 
-  room.on(RoomEvent.TrackSubscribed, (track: Track, pub: TrackPublication, participant: RemoteParticipant) => {
+  room.on(RoomEvent.TrackSubscribed, (track, pub, participant) => {
     if (track.kind === Track.Kind.Audio) {
       const a = track.attach();
       a.autoplay = true;
+      (a as any).playsInline = true;
       a.style.display = "none";
       document.body.appendChild(a);
       return;
     }
 
-    const screen = isScreenPublication(pub);
-    const kind = screen ? "screen" : "cam";
+    const kind: "cam" | "screen" = isScreenPublication(pub) ? "screen" : "cam";
     const tile = ensureTile(
       participant.identity,
-      `${participant.identity}${screen ? " (screen)" : ""}`,
+      `${participant.identity}${kind === "screen" ? " (screen)" : ""}`,
       kind
     );
 
     const v = track.attach();
-    attachVideoToTile(tile, v);
+    attachMedia(tile, v);
   });
 
-  room.on(RoomEvent.TrackUnsubscribed, (track: Track, pub: TrackPublication, participant: RemoteParticipant) => {
+  room.on(RoomEvent.TrackUnsubscribed, (track, pub, participant) => {
     if (track.kind === Track.Kind.Video) {
       removeTile(participant.identity, isScreenPublication(pub) ? "screen" : "cam");
     }
-    track.detach()?.forEach((el) => el.remove());
+    try {
+      track.detach()?.forEach((el) => el.remove());
+    } catch {}
   });
 
   room.on(RoomEvent.DataReceived, (payload, participant) => {
-    const text = new TextDecoder().decode(payload);
+    const raw = new TextDecoder().decode(payload);
+
     try {
-      const msg = JSON.parse(text);
+      const msg = JSON.parse(raw);
       if (msg?.t === "chat") {
         addMessage({
           from: msg.from || participant?.identity || "unknown",
@@ -225,32 +295,35 @@ async function doJoin() {
         return;
       }
     } catch {}
-    addMessage({ from: participant?.identity || "unknown", text, ts: Date.now() });
+
+    addMessage({ from: participant?.identity || "unknown", text: raw });
   });
 
   room.on(RoomEvent.Disconnected, () => {
     setStatus("Disconnected");
     resetUI();
     enableControls(false);
-    joinBtn.disabled = false;
+    qs<HTMLButtonElement>("#joinBtn").disabled = false;
   });
 
   /* ---- connect ---- */
 
   setStatus("Connecting...");
-  await room.connect(data.wsUrl, data.token);
-
-  // ✅ teacher публикует сразу
-  if (myRole === "teacher") {
-    await room.localParticipant.setCameraEnabled(true);
-    await room.localParticipant.setMicrophoneEnabled(true);
+  try {
+    await room.connect(data.wsUrl, data.token);
+  } catch (e: any) {
+    setStatus("Connect error: " + String(e?.message || e));
+    qs<HTMLButtonElement>("#joinBtn").disabled = false;
+    return;
   }
+
+  /* ---- local publish (teacher only) ---- */
 
   room.localParticipant.on(ParticipantEvent.LocalTrackPublished, (pub: LocalTrackPublication) => {
     const track = pub.track;
     if (!track || track.kind !== Track.Kind.Video) return;
 
-    const kind = isScreenPublication(pub) ? "screen" : "local";
+    const kind: "local" | "screen" = isScreenPublication(pub) ? "screen" : "local";
     const tile = ensureTile(
       "me",
       `${myName} (me)${kind === "screen" ? " (screen)" : ""}`,
@@ -259,21 +332,42 @@ async function doJoin() {
 
     const v = track.attach();
     v.muted = true;
-    attachVideoToTile(tile, v);
+    attachMedia(tile, v);
   });
+
+  if (myRole === "teacher") {
+    setStatus("Enabling camera/mic...");
+    try {
+      await room.localParticipant.setCameraEnabled(true);
+      await room.localParticipant.setMicrophoneEnabled(true);
+    } catch (e: any) {
+      addMessage({ from: "system", text: `Media error: ${String(e?.message || e)}` });
+    }
+  } // ✅ И teacher, И student публикуют cam + mic
+setStatus("Enabling camera/mic...");
+try {
+  await room.localParticipant.setCameraEnabled(true);
+  await room.localParticipant.setMicrophoneEnabled(true);
+} catch (e: any) {
+  addMessage({
+    from: "system",
+    text: `Media error: ${String(e?.message || e)}`,
+  });
+}
+
 
   enableControls(true);
   updateCount();
   setStatus("Connected ✅");
 
-  if (myRole === "student") {
-    addMessage({ from: "system", text: "You joined as student (view-only). Chat is enabled.", ts: Date.now() });
-  } else {
-    addMessage({ from: "system", text: "You joined as teacher. Camera/Mic enabled.", ts: Date.now() });
-  }
+  addMessage({
+    from: "system",
+    text:
+      myRole === "teacher"
+        ? "You joined as TEACHER. Camera/Mic enabled."
+        : "You joined as STUDENT (view-only). Chat enabled.",
+  });
 }
-
-/* ---------------- leave / controls ---------------- */
 
 async function doLeave() {
   room?.disconnect();
@@ -281,62 +375,88 @@ async function doLeave() {
   setStatus("Left room");
   resetUI();
   enableControls(false);
-  joinBtn.disabled = false;
+  qs<HTMLButtonElement>("#joinBtn").disabled = false;
 }
 
-async function sendChat() {
+function sendChat() {
   if (!room) return;
-  const text = chatInput.value.trim();
+
+  const input = qs<HTMLInputElement>("#chatText");
+  const text = (input.value || "").trim();
   if (!text) return;
 
-  room.localParticipant.publishData(
-    new TextEncoder().encode(JSON.stringify({ t: "chat", from: myName, ts: Date.now(), text })),
-    { reliable: true }
-  );
+  const payload = JSON.stringify({
+    t: "chat",
+    from: myName,
+    ts: Date.now(),
+    text,
+  });
+
+  // ✅ правильный вариант для новых livekit-client
+  room.localParticipant.publishData(new TextEncoder().encode(payload), {
+    reliable: true,
+  });
 
   addMessage({ from: myName, text, me: true });
-  chatInput.value = "";
+  input.value = "";
+  input.focus();
 }
 
-/* ---------------- UI bindings ---------------- */
+/* ---------------- boot ---------------- */
 
-joinBtn.onclick = () => void doJoin();
-leaveBtn.onclick = () => void doLeave();
+function boot() {
+  const joinBtn = qs<HTMLButtonElement>("#joinBtn");
+  const leaveBtn = qs<HTMLButtonElement>("#leaveBtn");
+  const sendBtn = qs<HTMLButtonElement>("#sendMsg");
+  const chatInput = qs<HTMLInputElement>("#chatText");
 
-micBtn.onclick = async () => {
-  if (!room || myRole !== "teacher") return;
-  micOn = !micOn;
-  await room.localParticipant.setMicrophoneEnabled(micOn);
-  micBtn.textContent = `Mic: ${micOn ? "ON" : "OFF"}`;
-};
+  joinBtn.onclick = () => void doJoin();
+  leaveBtn.onclick = () => void doLeave();
+  sendBtn.onclick = () => sendChat();
+  chatInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") sendChat();
+  });
 
-camBtn.onclick = async () => {
-  if (!room || myRole !== "teacher") return;
-  camOn = !camOn;
-  await room.localParticipant.setCameraEnabled(camOn);
-  camBtn.textContent = `Cam: ${camOn ? "ON" : "OFF"}`;
-  if (!camOn) removeTile("me", "local");
-};
+  const micBtn = qs<HTMLButtonElement>("#micBtn");
+  const camBtn = qs<HTMLButtonElement>("#camBtn");
+  const screenBtn = qs<HTMLButtonElement>("#screenBtn");
 
-screenBtn.onclick = async () => {
-  if (!room || myRole !== "teacher") return;
-  screenOn = !screenOn;
-  try {
-    await room.localParticipant.setScreenShareEnabled(screenOn);
-    screenBtn.textContent = screenOn ? "Stop Share" : "Share Screen";
-  } catch {
-    screenOn = false;
-    screenBtn.textContent = "Share Screen";
-    addMessage({ from: "system", text: "Screen share failed", ts: Date.now() });
+  micBtn.onclick = async () => {
+    if (!room || myRole !== "teacher") return;
+    micOn = !micOn;
+    await room.localParticipant.setMicrophoneEnabled(micOn);
+    micBtn.textContent = `Mic: ${micOn ? "ON" : "OFF"}`;
+  };
+
+  camBtn.onclick = async () => {
+    if (!room || myRole !== "teacher") return;
+    camOn = !camOn;
+    await room.localParticipant.setCameraEnabled(camOn);
+    camBtn.textContent = `Cam: ${camOn ? "ON" : "OFF"}`;
+    if (!camOn) removeTile("me", "local");
+  };
+
+  screenBtn.onclick = async () => {
+    if (!room || myRole !== "teacher") return;
+    screenOn = !screenOn;
+    try {
+      await room.localParticipant.setScreenShareEnabled(screenOn);
+      screenBtn.textContent = screenOn ? "Stop Share" : "Share Screen";
+      if (!screenOn) removeTile("me", "screen");
+    } catch {
+      screenOn = false;
+      screenBtn.textContent = "Share Screen";
+      addMessage({ from: "system", text: "Screen share failed" });
+    }
+  };
+
+  setStatus("Idle");
+  resetUI();
+  enableControls(false);
+
+  // Pre-fill room from URL: /join/class1
+  const match = window.location.pathname.match(/^\/join\/([^/]+)$/);
+  if (match?.[1]) {
+    qs<HTMLInputElement>("#room").value = decodeURIComponent(match[1]);
   }
-};
-
-sendBtn.onclick = () => void sendChat();
-chatInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") void sendChat();
-});
-
-// init
-setStatus("Idle");
-resetUI();
-enableControls(false);
+}

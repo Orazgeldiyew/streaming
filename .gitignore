@@ -14,5 +14,5 @@ wsl
 /dist/
 node_modules/
 dist/
-.env
+
 

@@ -9,10 +9,12 @@ export type JoinResponse = {
 const API_URL = "/api/v1/livekit/join";
 const API_SECRET = "secret123";
 
+// ✅ teacher выдаём только если teacherKey задан
 export async function fetchJoin(
   room: string,
   name: string,
-  role: "teacher" | "student"
+  role: "teacher" | "student",
+  teacherKey?: string
 ): Promise<JoinResponse> {
   const res = await fetch(API_URL, {
     method: "POST",
@@ -20,7 +22,12 @@ export async function fetchJoin(
       "Content-Type": "application/json",
       "Authorization": API_SECRET,
     },
-    body: JSON.stringify({ room, name, role }),
+    body: JSON.stringify({
+      room,
+      name,
+      role,
+      teacherKey: teacherKey || "",
+    }),
   });
 
   const data = await res.json().catch(() => ({}));
