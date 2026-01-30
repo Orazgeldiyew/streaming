@@ -31,15 +31,14 @@ export function mountRoomPage() {
         <option value="teacher">Teacher</option>
       </select>
 
-      <label class="small">Teacher key:</label>
+      <label>Teacher key:</label>
       <input id="teacherKey" placeholder="(only for teacher)" />
 
       <button id="joinBtn">Join</button>
-      <button id="leaveBtn" class="danger" disabled>Leave</button>
-
       <button id="micBtn" class="secondary" disabled>Mic: ON</button>
       <button id="camBtn" class="secondary" disabled>Cam: ON</button>
       <button id="screenBtn" class="secondary" disabled>Share Screen</button>
+      <button id="leaveBtn" class="danger" disabled>Leave</button>
     </header>
 
     <div id="statusBar">
@@ -68,7 +67,9 @@ export function mountRoomPage() {
         <div id="messages"></div>
         <div id="chatInput">
           <input id="chatText" placeholder="Type message…" />
-          <button id="sendMsg">Send</button>
+          <button id="sendMsg">
+            <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12L2.01 3L2 10L17 12L2 14L2.01 21Z"></path></svg>
+          </button>
         </div>
       </div>
     </div>
@@ -100,7 +101,12 @@ function nowTime(ts: number) {
   }
 }
 
-function addMessage(opts: { from: string; text: string; ts?: number; me?: boolean }) {
+function addMessage(opts: {
+  from: string;
+  text: string;
+  ts?: number;
+  me?: boolean;
+}) {
   const messagesEl = qs<HTMLDivElement>("#messages");
   const ts = opts.ts ?? Date.now();
 
@@ -137,13 +143,20 @@ function tileKey(identity: string, kind: "cam" | "screen" | "local") {
   return `tile__${identity}__${kind}`;
 }
 
-function ensureTile(identity: string, label: string, kind: "cam" | "screen" | "local") {
+function ensureTile(
+  identity: string,
+  label: string,
+  kind: "cam" | "screen" | "local",
+) {
   const videosEl = qs<HTMLDivElement>("#videos");
   const id = tileKey(identity, kind);
   let tile = document.getElementById(id);
 
   if (!tile) {
     tile = createTile(id, label);
+    if (kind === "screen") {
+      tile.classList.add("screen-tile");
+    }
     videosEl.appendChild(tile);
   } else {
     const badge = tile.querySelector(".badge");
@@ -165,13 +178,28 @@ function enableControls(connected: boolean) {
   const camBtn = qs<HTMLButtonElement>("#camBtn");
   const screenBtn = qs<HTMLButtonElement>("#screenBtn");
 
-  joinBtn.disabled = connected;
-  leaveBtn.disabled = !connected;
+  // Both teacher and student can publish cam/mic/screen
+  micBtn.disabled = !connected;
+  camBtn.disabled = !connected;
+  screenBtn.disabled = !connected;
+}
 
-  const canPublish = connected && myRole === "teacher";
-  micBtn.disabled = !canPublish;
-  camBtn.disabled = !canPublish;
-  screenBtn.disabled = !canPublish;
+function updateMediaButtons() {
+  const micBtn = qs<HTMLButtonElement>("#micBtn");
+  const camBtn = qs<HTMLButtonElement>("#camBtn");
+  const screenBtn = qs<HTMLButtonElement>("#screenBtn");
+
+  micBtn.textContent = micOn ? "Mic: ON" : "Mic: OFF";
+  micBtn.classList.remove("active", "inactive");
+  micBtn.classList.add(micOn ? "active" : "inactive");
+
+  camBtn.textContent = camOn ? "Cam: ON" : "Cam: OFF";
+  camBtn.classList.remove("active", "inactive");
+  camBtn.classList.add(camOn ? "active" : "inactive");
+
+  screenBtn.textContent = screenOn ? "Stop Share" : "Share Screen";
+  screenBtn.classList.remove("active", "inactive");
+  screenBtn.classList.add(screenOn ? "active" : "inactive");
 }
 
 function resetUI() {
@@ -182,12 +210,9 @@ function resetUI() {
   camOn = true;
   screenOn = false;
 
-  const micBtn = qs<HTMLButtonElement>("#micBtn");
-  const camBtn = qs<HTMLButtonElement>("#camBtn");
-  const screenBtn = qs<HTMLButtonElement>("#screenBtn");
+  updateMediaButtons();
 
-  micBtn.textContent = "Mic: ON";
-  camBtn.textContent = "Cam: ON";
+  const screenBtn = qs<HTMLButtonElement>("#screenBtn");
   screenBtn.textContent = "Share Screen";
 
   updateCount();
@@ -209,7 +234,7 @@ async function doJoin() {
 
   myRoomName = roomInput.value.trim();
   myName = nameInput.value.trim();
-  myRole = (roleSelect.value === "teacher" ? "teacher" : "student");
+  myRole = roleSelect.value === "teacher" ? "teacher" : "student";
   teacherKey = teacherKeyInput.value.trim();
 
   if (!myRoomName || !myName) {
@@ -264,7 +289,7 @@ async function doJoin() {
     const tile = ensureTile(
       participant.identity,
       `${participant.identity}${kind === "screen" ? " (screen)" : ""}`,
-      kind
+      kind,
     );
 
     const v = track.attach();
@@ -273,7 +298,10 @@ async function doJoin() {
 
   room.on(RoomEvent.TrackUnsubscribed, (track, pub, participant) => {
     if (track.kind === Track.Kind.Video) {
-      removeTile(participant.identity, isScreenPublication(pub) ? "screen" : "cam");
+      removeTile(
+        participant.identity,
+        isScreenPublication(pub) ? "screen" : "cam",
+      );
     }
     try {
       track.detach()?.forEach((el) => el.remove());
@@ -317,46 +345,52 @@ async function doJoin() {
     return;
   }
 
-  /* ---- local publish (teacher only) ---- */
+  /* ---- local publish ---- */
 
-  room.localParticipant.on(ParticipantEvent.LocalTrackPublished, (pub: LocalTrackPublication) => {
-    const track = pub.track;
-    if (!track || track.kind !== Track.Kind.Video) return;
+  room.localParticipant.on(
+    ParticipantEvent.LocalTrackPublished,
+    (pub: LocalTrackPublication) => {
+      const track = pub.track;
+      if (!track || track.kind !== Track.Kind.Video) return;
 
-    const kind: "local" | "screen" = isScreenPublication(pub) ? "screen" : "local";
-    const tile = ensureTile(
-      "me",
-      `${myName} (me)${kind === "screen" ? " (screen)" : ""}`,
-      kind
-    );
+      const kind: "local" | "screen" = isScreenPublication(pub)
+        ? "screen"
+        : "local";
+      const tile = ensureTile(
+        "me",
+        `${myName} (me)${kind === "screen" ? " (screen)" : ""}`,
+        kind,
+      );
 
-    const v = track.attach();
-    v.muted = true;
-    attachMedia(tile, v);
-  });
+      const v = track.attach();
+      v.muted = true;
+      attachMedia(tile, v);
+    },
+  );
 
-  if (myRole === "teacher") {
-    setStatus("Enabling camera/mic...");
-    try {
-      await room.localParticipant.setCameraEnabled(true);
-      await room.localParticipant.setMicrophoneEnabled(true);
-    } catch (e: any) {
-      addMessage({ from: "system", text: `Media error: ${String(e?.message || e)}` });
-    }
-  } // ✅ И teacher, И student публикуют cam + mic
-setStatus("Enabling camera/mic...");
-try {
-  await room.localParticipant.setCameraEnabled(true);
-  await room.localParticipant.setMicrophoneEnabled(true);
-} catch (e: any) {
-  addMessage({
-    from: "system",
-    text: `Media error: ${String(e?.message || e)}`,
-  });
-}
+  room.localParticipant.on(
+    ParticipantEvent.LocalTrackUnpublished,
+    (pub: LocalTrackPublication) => {
+      const kind: "local" | "screen" = isScreenPublication(pub)
+        ? "screen"
+        : "local";
+      removeTile("me", kind);
+    },
+  );
 
+  setStatus("Enabling camera/mic...");
+  try {
+    await room.localParticipant.setCameraEnabled(true);
+    await room.localParticipant.setMicrophoneEnabled(true);
+  } catch (e: any) {
+    addMessage({
+      from: "system",
+      text: `Media error: ${String(e?.message || e)}`,
+    });
+  }
 
   enableControls(true);
+  updateMediaButtons();
   updateCount();
   setStatus("Connected ✅");
 
@@ -364,8 +398,8 @@ try {
     from: "system",
     text:
       myRole === "teacher"
-        ? "You joined as TEACHER. Camera/Mic enabled."
-        : "You joined as STUDENT (view-only). Chat enabled.",
+        ? "You joined as TEACHER. Controls enabled."
+        : "You joined as STUDENT. Controls enabled.",
   });
 }
 
@@ -422,31 +456,47 @@ function boot() {
   const screenBtn = qs<HTMLButtonElement>("#screenBtn");
 
   micBtn.onclick = async () => {
-    if (!room || myRole !== "teacher") return;
+    if (!room) return;
     micOn = !micOn;
     await room.localParticipant.setMicrophoneEnabled(micOn);
-    micBtn.textContent = `Mic: ${micOn ? "ON" : "OFF"}`;
+    updateMediaButtons();
   };
 
   camBtn.onclick = async () => {
-    if (!room || myRole !== "teacher") return;
+    if (!room) return;
     camOn = !camOn;
     await room.localParticipant.setCameraEnabled(camOn);
-    camBtn.textContent = `Cam: ${camOn ? "ON" : "OFF"}`;
-    if (!camOn) removeTile("me", "local");
+    updateMediaButtons();
   };
 
   screenBtn.onclick = async () => {
-    if (!room || myRole !== "teacher") return;
+    if (!room) return;
+
+    if (!window.isSecureContext) {
+      addMessage({
+        from: "system",
+        text: "Screen sharing requires a secure context (HTTPS or localhost).",
+      });
+      return;
+    }
+
     screenOn = !screenOn;
     try {
       await room.localParticipant.setScreenShareEnabled(screenOn);
-      screenBtn.textContent = screenOn ? "Stop Share" : "Share Screen";
-      if (!screenOn) removeTile("me", "screen");
-    } catch {
+      updateMediaButtons();
+    } catch (e: any) {
+      console.error("Screen share error:", e);
       screenOn = false;
-      screenBtn.textContent = "Share Screen";
-      addMessage({ from: "system", text: "Screen share failed" });
+      updateMediaButtons();
+
+      let errorMsg = "Screen share failed";
+      if (e?.name === "NotAllowedError") {
+        errorMsg = "Screen share permission denied by user.";
+      } else if (e?.message) {
+        errorMsg = `Screen share failed: ${e.message}`;
+      }
+
+      addMessage({ from: "system", text: errorMsg });
     }
   };
 

@@ -95,6 +95,7 @@ func (s *LiveKitService) JoinToken(room, identity, displayName, role string) (st
 		grant.CanPublishSources = []string{
 			"camera",
 			"microphone",
+			"screen_share",
 		}
 	}
 

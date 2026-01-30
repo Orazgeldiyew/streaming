@@ -1,130 +1,240 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>Create / Join Room</title>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Create / Join Room</title>
 
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      max-width: 600px;
-      margin: 40px auto;
-    }
-
-    h1 {
-      margin-bottom: 10px;
-    }
-
-    input {
-      padding: 8px;
-      width: 100%;
-      margin: 6px 0 12px 0;
-      font-size: 16px;
-    }
-
-    button {
-      padding: 10px 16px;
-      font-size: 16px;
-      cursor: pointer;
-      margin-right: 10px;
-    }
-
-    #status {
-      margin-top: 15px;
-      color: #444;
-    }
-
-    .box {
-      border: 1px solid #ccc;
-      padding: 16px;
-      border-radius: 6px;
-    }
-  </style>
-</head>
-<body>
-
-  <h1>New Room</h1>
-  <p>Create or join a LiveKit room</p>
-
-  <div class="box">
-    <label>Room name</label>
-    <input id="room" placeholder="e.g. class1" />
-
-    <label>Your name</label>
-    <input id="name" placeholder="e.g. Bek" />
-
-    <button id="createBtn">Create room</button>
-    <button id="joinBtn">Join room</button>
-
-    <div id="status"></div>
-  </div>
-
-  <script>
-    const roomInput = document.getElementById("room");
-    const nameInput = document.getElementById("name");
-    const statusEl = document.getElementById("status");
-
-    const createBtn = document.getElementById("createBtn");
-    const joinBtn = document.getElementById("joinBtn");
-
-    function setStatus(text) {
-      statusEl.textContent = text;
-    }
-
-    function validate() {
-      const room = roomInput.value.trim();
-      const name = nameInput.value.trim();
-
-      if (!room || !name) {
-        setStatus("❌ Room and name are required");
-        return null;
+    <style>
+      :root {
+        --bg: #f8fafc;
+        --panel: #ffffff;
+        --panel2: #f1f5f9;
+        --border: #e2e8f0;
+        --text: #0f172a;
+        --muted: #64748b;
+        --blue: #2563eb;
+        --blue-hover: #1d4ed8;
+        --green: #10b981;
+        --green-hover: #059669;
+        --ring: rgba(37, 99, 235, 0.2);
       }
 
-      return { room, name };
-    }
+      * {
+        box-sizing: border-box;
+        transition:
+          background-color 0.2s,
+          border-color 0.2s,
+          box-shadow 0.2s;
+      }
 
-    // CREATE ROOM
-    createBtn.onclick = async () => {
-      const data = validate();
-      if (!data) return;
+      body {
+        font-family:
+          "Inter",
+          system-ui,
+          -apple-system,
+          sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        margin: 0;
+        padding: 20px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+        -webkit-font-smoothing: antialiased;
+      }
 
-      setStatus("Creating room...");
+      .container {
+        max-width: 440px;
+        width: 100%;
+      }
 
-      try {
-        const res = await fetch("/api/v1/livekit/join", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": "secret123"
-          },
-          body: JSON.stringify(data)
-        });
+      h1 {
+        font-size: 24px;
+        font-weight: 800;
+        margin-bottom: 8px;
+        text-align: center;
+      }
 
-        if (!res.ok) {
-          const err = await res.text();
-          setStatus("❌ API error: " + err);
-          return;
+      p {
+        color: var(--muted);
+        text-align: center;
+        margin-bottom: 32px;
+        font-size: 15px;
+      }
+
+      .box {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        padding: 32px;
+        border-radius: 16px;
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+      }
+
+      label {
+        display: block;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--muted);
+        margin-bottom: 6px;
+        margin-top: 16px;
+      }
+
+      label:first-child {
+        margin-top: 0;
+      }
+
+      input {
+        padding: 12px 16px;
+        width: 100%;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        color: var(--text);
+        font-size: 15px;
+        outline: none;
+      }
+
+      input:focus {
+        border-color: var(--blue);
+        box-shadow: 0 0 0 3px var(--ring);
+      }
+
+      .btn-group {
+        display: flex;
+        gap: 12px;
+        margin-top: 32px;
+      }
+
+      button {
+        flex: 1;
+        padding: 12px 16px;
+        font-size: 15px;
+        font-weight: 700;
+        cursor: pointer;
+        border-radius: 10px;
+        border: 1px solid transparent;
+        transition: all 0.2s;
+      }
+
+      #createBtn {
+        background: var(--blue);
+        color: white;
+      }
+
+      #createBtn:hover {
+        background: var(--blue-hover);
+        transform: translateY(-1px);
+      }
+
+      #joinBtn {
+        background: var(--panel2);
+        color: var(--text);
+        border-color: var(--border);
+      }
+
+      #joinBtn:hover {
+        background: #e2e8f0;
+        transform: translateY(-1px);
+      }
+
+      button:active {
+        transform: translateY(0);
+      }
+
+      #status {
+        margin-top: 24px;
+        text-align: center;
+        font-size: 14px;
+        min-height: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>New Room</h1>
+      <p>Create or join a LiveKit room</p>
+
+      <div class="box">
+        <label>Room name</label>
+        <input id="room" placeholder="e.g. class1" />
+
+        <label>Your name</label>
+        <input id="name" placeholder="e.g. Bek" />
+
+        <div class="btn-group">
+          <button id="createBtn">Create</button>
+          <button id="joinBtn">Join</button>
+        </div>
+
+        <div id="status"></div>
+      </div>
+    </div>
+
+    <script>
+      const roomInput = document.getElementById("room");
+      const nameInput = document.getElementById("name");
+      const statusEl = document.getElementById("status");
+
+      const createBtn = document.getElementById("createBtn");
+      const joinBtn = document.getElementById("joinBtn");
+
+      function setStatus(text) {
+        statusEl.textContent = text;
+      }
+
+      function validate() {
+        const room = roomInput.value.trim();
+        const name = nameInput.value.trim();
+
+        if (!room || !name) {
+          setStatus("❌ Room and name are required");
+          return null;
         }
 
-        // Room is auto-created by LiveKit on join
-        setStatus("✅ Room created. Redirecting...");
-
-        window.location.href = "/join/" + encodeURIComponent(data.room);
-
-      } catch (e) {
-        setStatus("❌ Network error: " + e.message);
+        return { room, name };
       }
-    };
 
-    // JOIN ROOM
-    joinBtn.onclick = () => {
-      const data = validate();
-      if (!data) return;
+      // CREATE ROOM
+      createBtn.onclick = async () => {
+        const data = validate();
+        if (!data) return;
 
-      setStatus("Joining room...");
-      window.location.href = "/join/" + encodeURIComponent(data.room);
-    };
-  </script>
+        setStatus("Creating room...");
 
-</body>
+        try {
+          const res = await fetch("/api/v1/livekit/join", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: "secret123",
+            },
+            body: JSON.stringify(data),
+          });
+
+          if (!res.ok) {
+            const err = await res.text();
+            setStatus("❌ API error: " + err);
+            return;
+          }
+
+          // Room is auto-created by LiveKit on join
+          setStatus("✅ Room created. Redirecting...");
+
+          window.location.href = "/join/" + encodeURIComponent(data.room);
+        } catch (e) {
+          setStatus("❌ Network error: " + e.message);
+        }
+      };
+
+      // JOIN ROOM
+      joinBtn.onclick = () => {
+        const data = validate();
+        if (!data) return;
+
+        setStatus("Joining room...");
+        window.location.href = "/join/" + encodeURIComponent(data.room);
+      };
+    </script>
+  </body>
 </html>
