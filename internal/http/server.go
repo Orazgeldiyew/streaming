@@ -1,20 +1,41 @@
 package http
 
 import (
+	"database/sql"
 	"log"
 
 	"github.com/gin-gonic/gin"
+
 	"streaming/internal/config"
 )
 
-func NewRouter(cfg config.Config) *gin.Engine {
+// =======================
+// Router
+// =======================
+
+func NewRouter(
+	cfg *config.Config,
+	db *sql.DB,
+) *gin.Engine {
 	r := gin.Default()
-	RegisterRoutes(r, cfg)
+
+	RegisterRoutes(r, cfg, db)
+
 	return r
 }
 
-func Run(cfg config.Config) error {
-	r := NewRouter(cfg)
-	log.Printf("HTTP listening on %s\n", cfg.ListenAddr())
-	return r.Run(cfg.ListenAddr())
+// =======================
+// HTTP server
+// =======================
+
+func Run(
+	cfg *config.Config,
+	db *sql.DB,
+) error {
+	r := NewRouter(cfg, db)
+
+	addr := cfg.ListenAddr()
+	log.Printf("HTTP listening on %s\n", addr)
+
+	return r.Run(addr)
 }
