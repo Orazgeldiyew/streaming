@@ -24,7 +24,7 @@ func RegisterRoutes(
 	// ================================
 	// ADMIN (protected)
 	// ================================
-	admin := r.Group("/admin")
+	admin := r.Group("/api/admin")
 	admin.Use(middleware.AdminBasicAuth(cfg.Admin.Username, cfg.Admin.Password))
 	{
 		admin.GET("/summary", handlers.AdminSummary(db))

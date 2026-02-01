@@ -4,7 +4,7 @@ rtc:
   tcp_port: 7881
 
   # 🔴 ОБЯЗАТЕЛЬНО
-  node_ip:  192.168.1.101
+  node_ip: 192.168.7.192
 
 keys:
   devkey: "debVq9RypzdLFGHaKNfYeXDmgOBs4JhTCcUZtPrWSQvkn1603I"

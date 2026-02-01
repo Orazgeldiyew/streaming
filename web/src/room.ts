@@ -53,23 +53,35 @@ export function mountRoomPage() {
     <div id="main">
       <div id="videosWrap">
         <div id="videosHeader">
-          <div>Participants videos</div>
+          <div>Classroom Feed</div>
           <div class="small">LiveKit</div>
         </div>
         <div id="videos"></div>
       </div>
 
-      <div id="chat">
-        <div id="chatHeader">
-          <div>Chat</div>
-          <div class="small">Data (reliable)</div>
+      <div id="sidebar">
+        <div id="chat">
+          <div id="chatHeader">
+            <div>Chat</div>
+            <div class="small">Data (reliable)</div>
+          </div>
+          <div id="messages"></div>
+          <div id="chatInput">
+            <input id="chatText" placeholder="Type message…" />
+            <button id="sendMsg">
+              <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12L2.01 3L2 10L17 12L2 14L2.01 21Z"></path></svg>
+            </button>
+          </div>
         </div>
-        <div id="messages"></div>
-        <div id="chatInput">
-          <input id="chatText" placeholder="Type message…" />
-          <button id="sendMsg">
-            <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12L2.01 3L2 10L17 12L2 14L2.01 21Z"></path></svg>
-          </button>
+
+        <div id="participants">
+          <div id="participantsHeader">
+            <div>Participants</div>
+            <div id="participantCount" class="small">0 members</div>
+          </div>
+          <div id="participantsContent">
+            <!-- Participant list items will be injected here -->
+          </div>
         </div>
       </div>
     </div>
@@ -133,10 +145,73 @@ function updateCount() {
 }
 
 function isScreenPublication(pub?: TrackPublication | LocalTrackPublication) {
-  return (
-    pub?.source === Track.Source.ScreenShare ||
-    pub?.source === Track.Source.ScreenShareAudio
-  );
+  if (!pub) return false;
+  if (
+    pub.source === Track.Source.ScreenShare ||
+    pub.source === Track.Source.ScreenShareAudio
+  ) {
+    return true;
+  }
+  const name = (pub.trackName || (pub.track as any)?.name || "").toLowerCase();
+  if (name.includes("screen")) return true;
+
+  if (
+    pub instanceof LocalTrackPublication &&
+    (pub.source as any) === "screen_share"
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function updateParticipantsList() {
+  const content = document.getElementById("participantsContent");
+  const countEl = document.getElementById("participantCount");
+  const r = room;
+  if (!content || !r) return;
+
+  const allParticipants = [
+    r.localParticipant,
+    ...Array.from(r.remoteParticipants.values()),
+  ];
+
+  if (countEl) {
+    countEl.textContent = `${allParticipants.length} member${allParticipants.length === 1 ? "" : "s"}`;
+  }
+
+  content.innerHTML = allParticipants
+    .map((p) => {
+      const identity = p.identity || "Unknown";
+      const isMe = p === r.localParticipant;
+      let role = "student";
+      try {
+        const meta = p.metadata ? JSON.parse(p.metadata) : {};
+        role = meta.role || "student";
+      } catch (e) {
+        console.warn("Failed to parse metadata", e);
+      }
+
+      const pubs = [...p.trackPublications.values()];
+      const hasVideo = pubs.some(
+        (pub) => pub.track?.kind === Track.Kind.Video && !pub.isMuted,
+      );
+
+      const statusIcon = hasVideo ? "📹" : "🎧";
+      const roleLabel =
+        role === "teacher" ? '<span class="teacher-badge">Teacher</span>' : "";
+
+      return `
+        <div class="participant-item ${isMe ? "me" : ""}">
+          <div class="pi-avatar">${identity.charAt(0).toUpperCase()}</div>
+          <div class="pi-info">
+            <div class="pi-name">${identity}${isMe ? " (you)" : ""} ${roleLabel}</div>
+            <div class="pi-status">${statusIcon} ${hasVideo ? "On Camera" : "Listening"}</div>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
 }
 
 function tileKey(identity: string, kind: "cam" | "screen" | "local") {
@@ -147,6 +222,7 @@ function ensureTile(
   identity: string,
   label: string,
   kind: "cam" | "screen" | "local",
+  isTeacher?: boolean,
 ) {
   const videosEl = qs<HTMLDivElement>("#videos");
   const id = tileKey(identity, kind);
@@ -157,10 +233,19 @@ function ensureTile(
     if (kind === "screen") {
       tile.classList.add("screen-tile");
     }
+    if (isTeacher) {
+      tile.classList.add("teacher-tile");
+    }
     videosEl.appendChild(tile);
   } else {
     const badge = tile.querySelector(".badge");
     if (badge) badge.textContent = label;
+
+    if (isTeacher) {
+      tile.classList.add("teacher-tile");
+    } else {
+      tile.classList.remove("teacher-tile");
+    }
   }
 
   return tile;
@@ -178,7 +263,8 @@ function enableControls(connected: boolean) {
   const camBtn = qs<HTMLButtonElement>("#camBtn");
   const screenBtn = qs<HTMLButtonElement>("#screenBtn");
 
-  // Both teacher and student can publish cam/mic/screen
+  joinBtn.disabled = connected;
+  leaveBtn.disabled = !connected;
   micBtn.disabled = !connected;
   camBtn.disabled = !connected;
   screenBtn.disabled = !connected;
@@ -215,6 +301,7 @@ function resetUI() {
   const screenBtn = qs<HTMLButtonElement>("#screenBtn");
   screenBtn.textContent = "Share Screen";
 
+  updateParticipantsList();
   updateCount();
 }
 
@@ -222,6 +309,7 @@ function resetUI() {
 
 async function doJoin() {
   enableControls(false);
+  qs<HTMLButtonElement>("#joinBtn").disabled = true;
   setStatus("Requesting token...");
 
   // ✅ unlock audio by user gesture
@@ -252,7 +340,7 @@ async function doJoin() {
     data = await fetchJoin(myRoomName, myName, myRole, teacherKey);
   } catch (e: any) {
     setStatus("API error: " + String(e?.message || e));
-    qs<HTMLButtonElement>("#joinBtn").disabled = false;
+    enableControls(false);
     return;
   }
 
@@ -265,6 +353,7 @@ async function doJoin() {
 
   room.on(RoomEvent.ParticipantConnected, (p: RemoteParticipant) => {
     addMessage({ from: "system", text: `${p.identity} joined` });
+    updateParticipantsList();
     updateCount();
   });
 
@@ -272,6 +361,7 @@ async function doJoin() {
     addMessage({ from: "system", text: `${p.identity} left` });
     removeTile(p.identity, "cam");
     removeTile(p.identity, "screen");
+    updateParticipantsList();
     updateCount();
   });
 
@@ -286,14 +376,19 @@ async function doJoin() {
     }
 
     const kind: "cam" | "screen" = isScreenPublication(pub) ? "screen" : "cam";
+    const meta = participant.metadata ? JSON.parse(participant.metadata) : {};
+    const isTeacher = meta.role === "teacher";
+
     const tile = ensureTile(
       participant.identity,
       `${participant.identity}${kind === "screen" ? " (screen)" : ""}`,
       kind,
+      isTeacher,
     );
 
     const v = track.attach();
     attachMedia(tile, v);
+    updateParticipantsList();
   });
 
   room.on(RoomEvent.TrackUnsubscribed, (track, pub, participant) => {
@@ -306,6 +401,35 @@ async function doJoin() {
     try {
       track.detach()?.forEach((el) => el.remove());
     } catch {}
+    updateParticipantsList();
+  });
+
+  room.on(RoomEvent.TrackMuted, (pub, participant) => {
+    if (pub.kind === Track.Kind.Video) {
+      const kind: "cam" | "screen" = isScreenPublication(pub)
+        ? "screen"
+        : "cam";
+      removeTile(participant.identity, kind);
+    }
+    updateParticipantsList();
+  });
+
+  room.on(RoomEvent.TrackUnmuted, (pub, participant) => {
+    if (pub.kind === Track.Kind.Video && pub.track) {
+      const kind: "cam" | "screen" = isScreenPublication(pub)
+        ? "screen"
+        : "cam";
+      const meta = participant.metadata ? JSON.parse(participant.metadata) : {};
+      const isTeacher = meta.role === "teacher";
+
+      const identity = participant.identity;
+      const label = `${identity}${kind === "screen" ? " (screen)" : ""}`;
+
+      const tile = ensureTile(identity, label, kind, isTeacher);
+      const video = pub.track.attach();
+      attachMedia(tile, video);
+    }
+    updateParticipantsList();
   });
 
   room.on(RoomEvent.DataReceived, (payload, participant) => {
@@ -356,17 +480,50 @@ async function doJoin() {
       const kind: "local" | "screen" = isScreenPublication(pub)
         ? "screen"
         : "local";
+      const isTeacher = myRole === "teacher";
+
       const tile = ensureTile(
         "me",
         `${myName} (me)${kind === "screen" ? " (screen)" : ""}`,
         kind,
+        isTeacher,
       );
 
       const v = track.attach();
       v.muted = true;
       attachMedia(tile, v);
+      updateParticipantsList();
     },
   );
+
+  room.localParticipant.on(ParticipantEvent.TrackMuted, (pub) => {
+    if (pub.kind === Track.Kind.Video) {
+      const kind: "local" | "screen" = isScreenPublication(pub)
+        ? "screen"
+        : "local";
+      removeTile("me", kind);
+    }
+    updateParticipantsList();
+  });
+
+  room.localParticipant.on(ParticipantEvent.TrackUnmuted, (pub) => {
+    if (pub.kind === Track.Kind.Video && pub.track) {
+      const kind: "local" | "screen" = isScreenPublication(pub)
+        ? "screen"
+        : "local";
+      const isTeacher = myRole === "teacher";
+      const tile = ensureTile(
+        "me",
+        `${myName} (me)${kind === "screen" ? " (screen)" : ""}`,
+        kind,
+        isTeacher,
+      );
+      const v = pub.track.attach();
+      v.muted = true;
+      attachMedia(tile, v);
+    }
+    updateParticipantsList();
+  });
 
   room.localParticipant.on(
     ParticipantEvent.LocalTrackUnpublished,
@@ -391,6 +548,7 @@ async function doJoin() {
 
   enableControls(true);
   updateMediaButtons();
+  updateParticipantsList();
   updateCount();
   setStatus("Connected ✅");
 
@@ -492,6 +650,8 @@ function boot() {
       let errorMsg = "Screen share failed";
       if (e?.name === "NotAllowedError") {
         errorMsg = "Screen share permission denied by user.";
+      } else if (e?.name === "NotFoundError") {
+        errorMsg = "Screen sharing is not supported on this device/browser.";
       } else if (e?.message) {
         errorMsg = `Screen share failed: ${e.message}`;
       }

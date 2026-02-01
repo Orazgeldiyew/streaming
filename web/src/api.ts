@@ -14,13 +14,13 @@ export async function fetchJoin(
   room: string,
   name: string,
   role: "teacher" | "student",
-  teacherKey?: string
+  teacherKey?: string,
 ): Promise<JoinResponse> {
   const res = await fetch(API_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": API_SECRET,
+      Authorization: API_SECRET,
     },
     body: JSON.stringify({
       room,
@@ -38,4 +38,30 @@ export async function fetchJoin(
   }
 
   return data as JoinResponse;
+}
+
+export type AdminSummaryResponse = {
+  total_lessons: number;
+  total_minutes: number;
+  teachers: { teacher: string; lessons: number }[];
+};
+
+export async function fetchAdminSummary(
+  auth: string,
+): Promise<AdminSummaryResponse> {
+  const res = await fetch("/api/admin/summary", {
+    method: "GET",
+    headers: {
+      Authorization: `Basic ${auth}`,
+    },
+  });
+
+  if (!res.ok) {
+    if (res.status === 401) {
+      throw new Error("Unauthorized");
+    }
+    throw new Error(`Admin API failed (${res.status})`);
+  }
+
+  return await res.json();
 }
